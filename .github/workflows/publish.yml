@@ -1,0 +1,245 @@
+name: Publish
+
+# Publishes to PyPI, and only ever from a release tag.
+#
+# The trigger is a pushed tag matching v<major>.<minor>.<patch>[suffix] — for
+# example v0.1.0 or v1.2.0rc1. Nothing else publishes: not a push to main, not
+# a merged PR, not an arbitrary tag like `demo` or `backup-2026`.
+#
+# Deliberately NOT triggered by `release: [published]` as well. With both
+# triggers active, tagging and then drafting a GitHub Release fires the
+# workflow twice and the second upload fails on a duplicate filename. Tags are
+# the single source of truth here; create the GitHub Release afterwards for the
+# changelog if you want one.
+#
+# A tag push does not wait for CI, so this workflow re-verifies everything
+# itself rather than assuming a green run exists.
+#
+# ---------------------------------------------------------------------------
+# One-time PyPI setup (Trusted Publishing — no API token is stored anywhere)
+#
+#   1. https://pypi.org/manage/account/publishing/
+#   2. Add a pending publisher:
+#        PyPI project name: starlette-permissions
+#        Owner:             korolenkowork
+#        Repository:        starlette-permissions
+#        Workflow:          publish.yml
+#        Environment:       pypi
+#   3. Create a GitHub environment named "pypi" (Settings -> Environments).
+#      Add yourself as a required reviewer there for a manual gate before
+#      anything reaches PyPI.
+#   4. Repeat on https://test.pypi.org for the "testpypi" environment.
+#
+# ---------------------------------------------------------------------------
+# To release
+#
+#   1. Bump `version` in pyproject.toml and `__version__` in
+#      src/starlette_permissions/__init__.py — they must match the tag.
+#   2. Move the CHANGELOG entry from [Unreleased] into the new version.
+#   3. git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+#
+# A dry run to TestPyPI is available from the Actions tab via "Run workflow".
+
+on:
+  push:
+    tags:
+      # Release tags only. Matches v0.1.0, v1.2.3, v1.0.0rc1, v2.0.0.post1.
+      # Does not match v1.2 or any non-version tag.
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Where to upload (manual runs go to TestPyPI by default)
+        required: true
+        default: testpypi
+        type: choice
+        options: [testpypi, pypi]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One publish at a time; never cancel one midway.
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify the tag is releasable
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, so the ancestry check below can see main.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.3
+
+      - name: Tag must match the packaged version
+        id: version
+        if: github.event_name == 'push'
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(poetry version --short)"
+          # grep rather than a python one-liner: no nested quoting to get wrong,
+          # and an extraction failure yields "" which fails the check below
+          # rather than passing silently.
+          DUNDER="$(grep -oE '^__version__ = "[^"]+"' \
+            src/starlette_permissions/__init__.py | cut -d'"' -f2)"
+
+          echo "tag=$TAG  pyproject=$PKG  __version__=$DUNDER"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match pyproject.toml version $PKG"
+            exit 1
+          fi
+          if [ "$TAG" != "$DUNDER" ]; then
+            echo "::error::Tag v$TAG does not match __version__ $DUNDER"
+            exit 1
+          fi
+
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          # PEP 440 pre-release suffixes: a1, b2, rc1, .dev3
+          if echo "$TAG" | grep -qE "(a|b|rc|dev)[0-9]*$"; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tag must point at a commit on main
+        if: github.event_name == 'push'
+        # Stops a release being cut from a feature branch or a stale commit.
+        run: |
+          git fetch -q origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME is not an ancestor of origin/main."
+            echo "::error::Merge to main first, then tag the merged commit."
+            exit 1
+          fi
+
+      - name: The changelog must mention this version
+        if: github.event_name == 'push'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! grep -q "\[$VERSION\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no [$VERSION] section."
+            exit 1
+          fi
+
+  test:
+    name: Full suite before publishing
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Poetry
+        run: pipx install poetry==2.1.3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: poetry install --with dev
+      - name: Lint, types, tests
+        # A tag push does not wait for CI, so re-run the gate here. Both ends
+        # of the supported Python range, since that is what ships.
+        run: |
+          poetry run ruff check .
+          poetry run ruff format --check .
+          poetry run mypy
+          poetry run pytest -q
+
+  build:
+    name: Build sdist and wheel
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.3
+
+      - run: poetry build
+
+      - name: Check the metadata renders on PyPI
+        run: |
+          pipx install twine
+          twine check --strict dist/*
+
+      - name: Artifacts must carry the tagged version
+        if: github.event_name == 'push'
+        # Guards against a stale dist/ or a build that picked up the wrong
+        # version somehow: the filenames themselves have to say so.
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          ls -1 dist/
+          test -f "dist/starlette_permissions-${VERSION}.tar.gz" \
+            || { echo "::error::sdist for ${VERSION} not found"; exit 1; }
+          test -f "dist/starlette_permissions-${VERSION}-py3-none-any.whl" \
+            || { echo "::error::wheel for ${VERSION} not found"; exit 1; }
+
+      - name: Install the built wheel and import it
+        # Catches a packaging mistake that passes tests from the source tree
+        # but ships a broken wheel — a missing subpackage, say.
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet "dist/starlette_permissions-${{ needs.verify.outputs.version }}-py3-none-any.whl"
+          /tmp/smoke/bin/python -c "
+          import starlette_permissions as sp, sys
+          assert 'fastapi' not in sys.modules, 'core must not import fastapi'
+          print('imported', sp.__version__, '->', sp.IsAuthenticated & sp.IsAdminUser)
+          "
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    name: Upload to TestPyPI
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/starlette-permissions
+    permissions:
+      id-token: write # Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    name: Upload to PyPI
+    needs: [verify, build]
+    # Tag pushes always publish; manual runs only when PyPI was chosen.
+    if: github.event_name == 'push' || inputs.target == 'pypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/starlette-permissions
+    permissions:
+      id-token: write # Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

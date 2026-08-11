@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+env/
+
+# This is a library, not an application: CI should resolve dependencies fresh
+# so that an upstream release breaking the supported range is caught here
+# rather than by users. Remove this line if you want pinned CI instead.
+poetry.lock
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Docs
+site/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store

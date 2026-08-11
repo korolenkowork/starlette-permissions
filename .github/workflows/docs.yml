@@ -1,0 +1,70 @@
+name: Docs
+
+# Builds the MkDocs site on every push and pull request, and publishes it to
+# GitHub Pages from main.
+#
+# One-time setup, needed before the first deploy succeeds:
+#   Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+# or, from the CLI:
+#   gh api -X POST repos/korolenkowork/starlette-permissions/pages \
+#     -f 'build_type=workflow'
+#
+# The site then serves at https://korolenkowork.github.io/starlette-permissions/
+# which is what mkdocs.yml's site_url already points at.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never let two deploys race. Queued rather than cancelled, so a deploy that
+  # has started is allowed to finish rather than leaving Pages half-updated.
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.3
+
+      - run: poetry install --with docs
+
+      - name: Build (warnings are errors)
+        # --strict turns a broken internal link or a bad nav entry into a
+        # failed build, so a PR cannot merge a docs site that does not hold
+        # together.
+        run: poetry run mkdocs build --strict
+
+      - name: Upload the site
+        # Only main gets published; on a PR the build above is the whole point.
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # to publish
+      id-token: write # for the deployment's OIDC token
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

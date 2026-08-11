@@ -1,0 +1,77 @@
+site_name: starlette-permissions
+site_description: Django-style permission classes for Starlette and FastAPI.
+site_url: https://korolenkowork.github.io/starlette-permissions/
+repo_url: https://github.com/korolenkowork/starlette-permissions
+repo_name: starlette-permissions
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Guide:
+      - Writing permissions: permissions.md
+      - Combining permissions: composition.md
+      - Object-level permissions: object-permissions.md
+      - Settings: settings.md
+      - Testing: testing.md
+  - Frameworks:
+      - FastAPI: fastapi.md
+      - Starlette: starlette.md
+      - SQLAlchemy: sqlalchemy.md
+  - Compatibility: compatibility.md
+  - Migrating from DRF: migration-from-drf.md
+  - API reference: api-reference.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_source: false
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            filters: ["!^_"]
+
+watch:
+  - src/starlette_permissions
