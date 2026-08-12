@@ -42,10 +42,29 @@ jobs:
 
       - run: poetry install --with docs
 
+      - name: Warn if analytics would be silently disabled
+        # A missing variable does not fail the build — it just quietly ships a
+        # site with no tracking, which is easy not to notice for months.
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          if [ -z "${{ vars.GOOGLE_ANALYTICS_KEY }}" ]; then
+            echo "::warning::GOOGLE_ANALYTICS_KEY is unset, so this deploy ships without analytics. Set it with: gh variable set GOOGLE_ANALYTICS_KEY --body G-XXXXXXXXXX"
+          else
+            echo "Analytics enabled for this deploy."
+          fi
+
       - name: Build (warnings are errors)
         # --strict turns a broken internal link or a bad nav entry into a
         # failed build, so a PR cannot merge a docs site that does not hold
         # together.
+        #
+        # The Analytics ID is injected only for the deploy from main. On pull
+        # requests the variable resolves to empty and the tracker is omitted,
+        # so preview builds never report into production stats.
+        env:
+          GOOGLE_ANALYTICS_KEY: >-
+            ${{ (github.ref == 'refs/heads/main' && github.event_name != 'pull_request')
+                && vars.GOOGLE_ANALYTICS_KEY || '' }}
         run: poetry run mkdocs build --strict
 
       - name: Upload the site

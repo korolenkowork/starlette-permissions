@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+<!--
+  Theme override, used for tags that have to sit in <head> and that
+  mkdocs.yml has no field for.
+
+  Material renders `extrahead` inside <head> on every page, so the
+  verification tag is served from the site root — which is where Search
+  Console looks — as well as everywhere else.
+-->
+{% block extrahead %}
+  {# Google Search Console — verifies ownership of the site. Public by
+     design: Google has to be able to read it in the served HTML. #}
+  <meta name="google-site-verification" content="ngd2C5oZIE4hO7LgUBOpmmr1CBgbiK9uR-WHVldVUW8" />
+{% endblock %}
+
+{#
+  Material gates the analytics partial on `provider` alone, so with the
+  Measurement ID unset it still emits the tracker bootstrap with an empty
+  `id=`. Harmless — the request only fires after consent — but it is dead
+  weight in every page and a confusing thing to find in view-source on a
+  local build. Render it only when there is an ID to report to.
+#}
+{% block analytics %}
+  {% if config.extra.analytics and config.extra.analytics.property %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}

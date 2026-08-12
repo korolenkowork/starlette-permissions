@@ -7,6 +7,9 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  # Holds main.html, which injects the Google Search Console verification tag
+  # into <head>. Material has no config field for arbitrary meta tags.
+  custom_dir: overrides
   features:
     - content.code.copy
     - navigation.sections
@@ -57,6 +60,43 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+
+extra:
+  # Google Analytics 4. The Measurement ID comes from the environment rather
+  # than being committed: it is not a secret (it ships in the page anyway), but
+  # keeping it out of the repo means local builds and PR previews do not report
+  # into production stats.
+  #
+  # Set it in CI as the repository variable GOOGLE_ANALYTICS_KEY; see docs.yml.
+  # With the variable unset, the `analytics` block in overrides/main.html skips
+  # the tracker altogether, so local builds and `mkdocs serve` emit nothing.
+  analytics:
+    provider: google
+    property: !ENV [GOOGLE_ANALYTICS_KEY, ""]
+    feedback:
+      title: Was this page helpful?
+      ratings:
+        - icon: material/thumb-up-outline
+          name: Helpful
+          data: 1
+          note: Thanks for the feedback.
+        - icon: material/thumb-down-outline
+          name: Could be better
+          data: 0
+          note: >-
+            Please <a href="https://github.com/korolenkowork/starlette-permissions/issues/new"
+            target="_blank" rel="noopener">open an issue</a> describing what was missing.
+
+  # gtag.js sets cookies, which needs consent in the EU/UK. Material's built-in
+  # banner gates analytics behind it: with `actions: [accept, reject, manage]`
+  # nothing is loaded until the visitor accepts.
+  consent:
+    title: Cookie consent
+    description: >-
+      This site uses cookies to measure which pages get read, so the
+      documentation can be improved. Rejecting them leaves the site fully
+      usable.
+    actions: [accept, reject, manage]
 
 plugins:
   - search
